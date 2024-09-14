@@ -2,6 +2,7 @@ from skiros2_skill.core.skill import SkillDescription
 from skiros2_common.core.primitive import PrimitiveBase
 from skiros2_common.core.world_element import Element
 from skiros2_common.core.params import ParamTypes
+from skiros2_std_skills.thread_primitive import PrimitiveThreadBase
 
 
 #################################################################################
@@ -54,11 +55,11 @@ class WmSetRelation(SkillDescription):
         self.addParam("RelationState", True, ParamTypes.Required)
 
 
-class wm_set_relation(PrimitiveBase):
+class wm_set_relation(PrimitiveThreadBase):
     def createDescription(self):
         self.setDescription(WmSetRelation(), self.__class__.__name__)
 
-    def execute(self):
+    def run(self):
         src = self.params["Src"].value
         relation = self.params["Relation"].value
         dst = self.params["Dst"].value
