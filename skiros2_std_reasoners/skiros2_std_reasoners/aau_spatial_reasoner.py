@@ -1,9 +1,12 @@
 from skiros2_common.core.discrete_reasoner import DiscreteReasoner
 import skiros2_common.tools.logger as log
+from skiros2_common.core.world_element import Element
 import tf2_ros as tf
 from .transformations import euler_from_quaternion, quaternion_from_euler
-from geometry_msgs.msg import Pose, TransformStamped, PoseStamped
+# from geometry_msgs.msg import Pose, TransformStamped, PoseStamped
+from tf2_geometry_msgs import Pose, TransformStamped, PoseStamped
 import rclpy
+from rclpy.node import Node
 from rclpy.duration import Duration
 from rclpy.time import Time
 import numpy
@@ -13,7 +16,7 @@ from numpy import clip
 
 
 class AauSpatialReasoner(DiscreteReasoner):
-    def init_ros(self, node):
+    def init_ros(self, node: Node):
         """
         @brief Reasoner handling transformations and spatial relations
 
@@ -49,7 +52,7 @@ class AauSpatialReasoner(DiscreteReasoner):
         self._tlb = tf.Buffer()
         self._tl = tf.TransformListener(self._tlb, self._node)
 
-    def parse(self, element, action):
+    def parse(self, element: Element, action):
         """
         @brief      Called by the world model every time an objects is modified
 
@@ -79,7 +82,7 @@ class AauSpatialReasoner(DiscreteReasoner):
         self._tf_list = {}
         self._linked_list = {}
         self._to_rebase_list = {}
-        root = self._wmi.get_element("skiros:Scene-0")
+        root: Element = self._wmi.get_element("skiros:Scene-0")
         self._spatial_rels = self._wmi.get_sub_properties("skiros:spatiallyRelated")
         if root.hasProperty("skiros:FrameId"):
             self._base_frame = root.getProperty("skiros:FrameId").value
@@ -91,7 +94,7 @@ class AauSpatialReasoner(DiscreteReasoner):
         for e in self._wmi.get_recursive(root.id, "skiros:spatiallyRelated").values():
             self.parse(e, "add")
 
-    def _getParentFrame(self, e):
+    def _getParentFrame(self, e: Element):
         """
         @brief      Gets the parent frame in the skiros world scene
 
@@ -103,7 +106,7 @@ class AauSpatialReasoner(DiscreteReasoner):
         if not c_rel:
             raise Exception("Element {} has not parent. Debug: {}".format(
                 e.printState(), e.printState(True)))
-        parent = self._wmi.get_element(c_rel['src'])
+        parent: Element = self._wmi.get_element(c_rel['src'])
         if parent.id in self._tf_list or parent.id in self._linked_list or parent.id == "skiros:Scene-0":
             return parent.getProperty("skiros:FrameId").value
         else:
@@ -122,7 +125,8 @@ class AauSpatialReasoner(DiscreteReasoner):
                     fails.
         """
         try:
-            t = self._tlb.lookup_transform(base_frm, target_frm, Time(), duration)
+            # t = self._tlb.lookup_transform(base_frm, target_frm, Time(), duration)
+            t = self.spin_lookup_transform(base_frm, target_frm, Time(), duration) # Temporary fix
             return ((t.transform.translation.x, t.transform.translation.y, t.transform.translation.z),
                     (t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w))
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
@@ -147,8 +151,9 @@ class AauSpatialReasoner(DiscreteReasoner):
                 self._node.get_logger().warn("[{}] {} failed to transform. Empty source '{}' or target '{}' frame.".format(
                 self.__class__.__name__, element, pose.header.frame_id, target_frm))
                 return False
-            self._tlb.lookup_transform(target_frm, pose.header.frame_id,
-                                       pose.header.stamp, duration)
+            # self._tlb.lookup_transform(target_frm, pose.header.frame_id,
+            #                            pose.header.stamp, duration)
+            self.spin_lookup_transform(target_frm, pose.header.frame_id, pose.header.stamp, duration) # Temporary fix
             element.setData(":PoseStampedMsg", self._tlb.transform(pose, target_frm))
             element.setProperty("skiros:TfTimeStamp", None)
             log.info(self.__class__.__name__, "{} transformed from base {} to base {}".format(
@@ -166,7 +171,7 @@ class AauSpatialReasoner(DiscreteReasoner):
         """
         for k in list(self._linked_list.keys()):
             self.k = k
-            e = self._wmi.get_element(k)
+            e: Element = self._wmi.get_element(k)
             base_frm = e.getProperty("skiros:BaseFrameId").value
             if not e.hasProperty("skiros:LinkedToFrameId", not_none=True) or \
                     e.hasProperty("skiros:LinkedToFrameId", ""):
@@ -188,7 +193,7 @@ class AauSpatialReasoner(DiscreteReasoner):
             self._wmi.update_element(e, self.__class__.__name__)
         self._e_to_update = list()
 
-    def _publishTransform(self, e):
+    def _publishTransform(self, e: Element):
         """
         @brief      Publish the element pose on tf
 
@@ -225,7 +230,7 @@ class AauSpatialReasoner(DiscreteReasoner):
             return q
         return q / norm
 
-    def _trigger_children_update(self, e):
+    def _trigger_children_update(self, e: Element):
         """
         @brief Children of e get scheduled for a check of the parent frame
         """
@@ -271,7 +276,7 @@ class AauSpatialReasoner(DiscreteReasoner):
                 self._register(element, parent_frame)
                 self._wmi.update_properties(element, self.__class__.__name__, self)
 
-    def _register(self, element, parent_frame):
+    def _register(self, element: Element, parent_frame):
         """
         @brief Adds an element to tf publish list
         """
@@ -286,7 +291,7 @@ class AauSpatialReasoner(DiscreteReasoner):
         element._last_tf_timestamp = self._node.get_clock().now()
         self._tf_list[element.id] = element
 
-    def _unregister(self, element, set_publish_property=True):
+    def _unregister(self, element: Element, set_publish_property=True):
         """
         @brief Removes an element from tf publish list
         """
@@ -297,7 +302,7 @@ class AauSpatialReasoner(DiscreteReasoner):
             del self._tf_list[element.id]
             self._trigger_children_update(element)
 
-    def _format_element(self, element):
+    def _format_element(self, element: Element):
         """
         @brief Format element properties and register to tf publish list
         """
@@ -346,7 +351,7 @@ class AauSpatialReasoner(DiscreteReasoner):
             self._publish_tf_list()
             rate.sleep()
 
-    def onAddProperties(self, element):
+    def onAddProperties(self, element: Element):
         """
         @brief Add default reasoner properties to the element
         """
@@ -379,7 +384,7 @@ class AauSpatialReasoner(DiscreteReasoner):
         if not element.hasProperty("skiros:SizeZ"):
             element.setProperty("skiros:SizeZ", float)
 
-    def onRemoveProperties(self, element):
+    def onRemoveProperties(self, element: Element):
         """
         @brief Remove default reasoner properties to the element
         """
@@ -387,7 +392,7 @@ class AauSpatialReasoner(DiscreteReasoner):
             if element.hasProperty(k):
                 element.removeProperty(k)
 
-    def hasData(self, element, get_code):
+    def hasData(self, element: Element, get_code):
         """
         @brief Return true if the data is available in the element
         """
@@ -410,7 +415,7 @@ class AauSpatialReasoner(DiscreteReasoner):
             log.error("[AauSpatialReasoner] Code {} not recognized".format(get_code))
             return False
 
-    def getData(self, element, get_code):
+    def getData(self, element: Element, get_code):
         """
         @brief Return data from the element in the format indicated in get_code
         """
@@ -479,7 +484,7 @@ class AauSpatialReasoner(DiscreteReasoner):
             log.error("[AauSpatialReasoner] Code {} not recognized".format(get_code))
             return None
 
-    def setData(self, element, data, set_code):
+    def setData(self, element: Element, data, set_code):
         """
         @brief Convert user data to reasoner data and store it into given element
         """
@@ -680,7 +685,8 @@ class AauSpatialReasoner(DiscreteReasoner):
                 if obj.getProperty("skiros:FrameId").value == "":
                     obj.setProperty("skiros:FrameId", "obj_temp_frame")
                     self._tlb.settransform(self.getData(obj, ":TransformMsg"), "AauSpatialReasoner")
-                self._tlb.lookup_transform(obj_base_frame, sub_frame, Time(), Duration(nanoseconds=10**9))
+                # self._tlb.lookup_transform(obj_base_frame, sub_frame, Time(), Duration(nanoseconds=10**9))
+                self.spin_lookup_transform(obj_base_frame, sub_frame, Time(), Duration(seconds=1)) # Temporary fix
                 obj.setData(":PoseStampedMsg", self._tlb.transform(obj.getData(":PoseStampedMsg"), sub_frame))
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
                 log.error("[computeRelations]", "Couldn't transform object in frame {} to frame {}.".format(
@@ -716,3 +722,16 @@ class AauSpatialReasoner(DiscreteReasoner):
             to_ret.append(self._get_orientation_relation(oo)[0])
         # print to_ret
         return to_ret
+    
+    def spin_lookup_transform(self, to_frame, from_frame, stamp=Time(), duration=Duration(seconds=0.1)):
+        """
+        @brief Temporarily fix for spinning
+        """
+        if duration == Duration(seconds=0.0):
+            duration = Duration(seconds=0.1)
+        time_start = self._node.get_clock().now()
+        while not self._tlb.can_transform(to_frame, from_frame, stamp):
+            rclpy.spin_once(self._node, timeout_sec=0.03)
+            if time_start + duration < self._node.get_clock().now():
+                raise Exception("Timeout, could not find transformation between {} and {}".format(from_frame, to_frame))
+        return self._tlb.lookup_transform(to_frame, from_frame, stamp, duration)
